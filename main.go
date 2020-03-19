@@ -1,27 +1,23 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"crypto/sha256"
-	"os"
-	"io"
-	"path/filepath"
+	"fmt"
 	bolt "go.etcd.io/bbolt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
 	"time"
 )
-
-
-
 
 type fileHash struct {
 	path string
 	hash []byte
 }
 
-
 func lookupHash(path string, bucket string, db *bolt.DB) []byte {
-	var hash []byte 
+	var hash []byte
 	db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		v := b.Get([]byte(path))
@@ -34,10 +30,9 @@ func lookupHash(path string, bucket string, db *bolt.DB) []byte {
 	return hash
 }
 
-
 func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
-		
+
 		h := lookupHash(j, "NFSPath2Hash", db)
 		if h != nil {
 			// fmt.Printf("db returned hash is %x\n", h)
@@ -56,8 +51,8 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			fh.path = j
 			fh.hash = h.Sum(nil)
 
-					fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
-		
+			fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
+
 			db.Update(func(tx *bolt.Tx) error {
 				h2p := tx.Bucket([]byte("NFSHash2Path"))
 				err := h2p.Put([]byte(fh.hash), []byte(fh.path))
@@ -77,10 +72,9 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 	}
 }
 
-
 func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
-		
+
 		h := lookupHash(j, "PhotosPath2Hash", db)
 		if h != nil {
 			// fmt.Printf("db returned hash is %x\n", h)
@@ -100,7 +94,7 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			fh.hash = h.Sum(nil)
 
 			fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
-		
+
 			db.Update(func(tx *bolt.Tx) error {
 				h2p := tx.Bucket([]byte("PhotosHash2Path"))
 				err := h2p.Put([]byte(fh.hash), []byte(fh.path))
@@ -120,7 +114,6 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 	}
 }
 
-
 func walkFilePath(path string, jobs chan<- string) {
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -131,7 +124,7 @@ func walkFilePath(path string, jobs chan<- string) {
 		if info.IsDir() == false {
 			jobs <- path
 		}
-		
+
 		return nil
 	})
 
@@ -144,9 +137,9 @@ func main() {
 	var workers int
 	workers = 5
 	fmt.Println("Starting up")
-	
+
 	var err error
-	
+
 	db, err := bolt.Open("photo.db", 0600, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -185,11 +178,8 @@ func main() {
 		return nil
 	})
 
-
-
-
 	jobs := make(chan string, 200)
-	results := make( chan fileHash, 10)
+	results := make(chan fileHash, 10)
 	nfs := make(chan string, 200)
 
 	for w := 1; w <= workers; w++ {
@@ -206,5 +196,5 @@ func main() {
 		walkFilePath("/Users/bwdezend/Pictures/Photos Library.photoslibrary/Masters/2020", jobs)
 		fmt.Println("looping")
 		time.Sleep(time.Second * 90)
-	} 
+	}
 }
