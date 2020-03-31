@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/rwcarlsen/goexif/exif"
 	bolt "go.etcd.io/bbolt"
 	"io"
 	"log"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 )
+
+const storagePath = "/mnt/nfs/photos/golang-test"
 
 type fileHash struct {
 	path string
@@ -44,7 +47,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			if err != nil {
 				log.Fatal(err)
 			}
-			fmt.Printf("%d Hashing unseen file: %s\n", len(jobs), j)
+			// fmt.Printf("%d Hashing unseen file: %s\n", len(jobs), j)
 			if _, err := io.Copy(h, f); err != nil {
 				log.Fatal(err)
 			}
@@ -76,20 +79,55 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 	for j := range jobs {
 
 		h := lookupHash(j, "PhotosPath2Hash", db)
+
 		if h != nil {
 			// fmt.Printf("db returned hash is %x\n", h)
 		} else {
 			var fh fileHash
 			h := sha256.New()
 
+			var fileYear, fileMonth, fileDay int
+			fileYear, fileMonth, fileDay = 0000, 00, 00
+
 			f, err := os.Open(j)
 			if err != nil {
 				log.Fatal(err)
 			}
-			fmt.Printf("%d Hashing unseen file: %s\n", len(jobs), j)
+			// fmt.Printf("%d Hashing unseen file: %s\n", len(jobs), j)
 			if _, err := io.Copy(h, f); err != nil {
 				log.Fatal(err)
 			}
+
+			exifRead, err := os.Open(j)
+			if err != nil {
+				fmt.Println("Error!", err)
+			}
+
+			fileExif, err := exif.Decode(exifRead)
+			if err != nil {
+				fmt.Println("Error!", err)
+			} else {
+
+				t, err := fileExif.DateTime()
+				if err != nil {
+					fmt.Println("Error!", err)
+				}
+				fileYear = t.Year()
+				fileMonth = int(t.Month())
+				fileDay = t.Day()
+
+				folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", storagePath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
+				filePath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", storagePath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
+				// fmt.Println(folderPath, filePath)
+
+				os.MkdirAll(folderPath, os.ModePerm)
+
+				// fmt.Printf("New path: %s/%d/%d-%02d/%d-%02d-%02d/%s\n",
+				//	storagePath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
+				copyFileContents(j, filePath)
+				fmt.Println("copy ", j, filePath)
+			}
+
 			fh.path = j
 			fh.hash = h.Sum(nil)
 
@@ -114,10 +152,70 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 	}
 }
 
+// CopyFile copies a file from src to dst. If src and dst files exist, and are
+// the same, then return success. Otherise, attempt to create a hard link
+// between the two files. If that fail, copy the file contents from src to dst.
+func CopyFile(src, dst string) (err error) {
+	sfi, err := os.Stat(src)
+	if err != nil {
+		return
+	}
+	if !sfi.Mode().IsRegular() {
+		// cannot copy non-regular files (e.g., directories,
+		// symlinks, devices, etc.)
+		return fmt.Errorf("CopyFile: non-regular source file %s (%q)", sfi.Name(), sfi.Mode().String())
+	}
+	dfi, err := os.Stat(dst)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return
+		}
+	} else {
+		if !(dfi.Mode().IsRegular()) {
+			return fmt.Errorf("CopyFile: non-regular destination file %s (%q)", dfi.Name(), dfi.Mode().String())
+		}
+		if os.SameFile(sfi, dfi) {
+			return
+		}
+	}
+	if err = os.Link(src, dst); err == nil {
+		return
+	}
+	err = copyFileContents(src, dst)
+	return
+}
+
+// copyFileContents copies the contents of the file named src to the file named
+// by dst. The file will be created if it does not already exist. If the
+// destination file exists, all it's contents will be replaced by the contents
+// of the source file.
+func copyFileContents(src, dst string) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return
+	}
+	defer func() {
+		cerr := out.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
+	if _, err = io.Copy(out, in); err != nil {
+		return
+	}
+	err = out.Sync()
+	return
+}
+
 func walkFilePath(path string, jobs chan<- string) {
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", path, err)
+			// fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", path, err)
 			// return err
 		}
 
@@ -129,7 +227,7 @@ func walkFilePath(path string, jobs chan<- string) {
 	})
 
 	if err != nil {
-		fmt.Println("kaboom: ", err)
+		fmt.Println("filepath.Walk error: ", err)
 	}
 }
 
@@ -190,7 +288,7 @@ func main() {
 		go nfsStorageWorker(w, nfs, results, db)
 	}
 
-	walkFilePath("/mnt/nfs/photos/MasterImages", nfs)
+	walkFilePath(storagePath, nfs)
 
 	for true {
 		walkFilePath("/Users/bwdezend/Pictures/Photos Library.photoslibrary/Masters/2020", jobs)
