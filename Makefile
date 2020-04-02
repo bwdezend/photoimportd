@@ -30,5 +30,8 @@ go_lint:
 		bash -c 'go get golang.org/x/lint/golint && go list ./... | xargs -L1 golint -set_exit_status'
 
 
+debug:
+	go run *go -debug
+
 run:
-	go run *go
+	go run *go 
