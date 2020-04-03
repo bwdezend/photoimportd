@@ -2,21 +2,47 @@ package main
 
 import (
 	"crypto/sha256"
+	"flag"
 	"fmt"
 	"github.com/rwcarlsen/goexif/exif"
+	log "github.com/sirupsen/logrus"
 	bolt "go.etcd.io/bbolt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-const storagePath = "/mnt/nfs/photos/golang-test"
+var dstPath = flag.String("dst", "/mnt/nfs/photos/golang-test", "Long term storage path")
+var srcPath = flag.String("src", "/Users/bwdezend/Pictures/Photos Library.photoslibrary/Masters", "Photo library Master path")
+var debugEnabled = flag.Bool("debug", false, "Turn on debug")
+var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
 
 type fileHash struct {
 	path string
 	hash []byte
+}
+
+func init() {
+	flag.Parse()
+
+	// Log as JSON instead of the default ASCII formatter.
+	log.SetFormatter(&log.JSONFormatter{})
+	log.Warn("Starting Up")
+
+	// Output to stdout instead of the default stderr
+	// Can be any io.Writer, see below for File example
+	log.SetOutput(os.Stdout)
+
+	if *debugEnabled {
+		log.SetLevel(log.DebugLevel)
+		log.Debug("Debug Logging Enabled")
+	} else {
+		// Only log the warning severity or above.
+		log.SetLevel(log.WarnLevel)
+	}
+
+	log.Info("Sleep interval set to ", *sleepInterval, " seconds")
 }
 
 func lookupHash(path string, bucket string, db *bolt.DB) []byte {
@@ -25,7 +51,7 @@ func lookupHash(path string, bucket string, db *bolt.DB) []byte {
 		b := tx.Bucket([]byte(bucket))
 		v := b.Get([]byte(path))
 		if v != nil {
-			// fmt.Printf("The hash of %s is: %x\n", path, v)
+			log.WithFields(log.Fields{"path": path, "hash": fmt.Sprintf("%x", v)}).Trace("hash exists")
 			hash = v
 		}
 		return nil
@@ -37,9 +63,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 	for j := range jobs {
 
 		h := lookupHash(j, "NFSPath2Hash", db)
-		if h != nil {
-			// fmt.Printf("db returned hash is %x\n", h)
-		} else {
+		if h == nil {
 			var fh fileHash
 			h := sha256.New()
 
@@ -47,14 +71,15 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			if err != nil {
 				log.Fatal(err)
 			}
-			// fmt.Printf("%d Hashing unseen file: %s\n", len(jobs), j)
+			log.WithFields(log.Fields{"path": j}).Info("Hashing unseen file")
 			if _, err := io.Copy(h, f); err != nil {
 				log.Fatal(err)
 			}
 			fh.path = j
 			fh.hash = h.Sum(nil)
 
-			fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
+			log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Info("Adding file to database")
+			// fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
 
 			db.Update(func(tx *bolt.Tx) error {
 				h2p := tx.Bucket([]byte("NFSHash2Path"))
@@ -86,8 +111,9 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			var fh fileHash
 			h := sha256.New()
 
-			var fileYear, fileMonth, fileDay int
-			fileYear, fileMonth, fileDay = 0000, 00, 00
+			fileYear := 0
+			fileMonth := 0
+			fileDay := 0
 
 			f, err := os.Open(j)
 			if err != nil {
@@ -95,8 +121,11 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			}
 			// fmt.Printf("%d Hashing unseen file: %s\n", len(jobs), j)
 			if _, err := io.Copy(h, f); err != nil {
-				log.Fatal(err)
+				log.WithFields(log.Fields{"path": j}).Fatal("Error!", err)
 			}
+
+			fh.path = j
+			fh.hash = h.Sum(nil)
 
 			exifRead, err := os.Open(j)
 			if err != nil {
@@ -107,31 +136,32 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			if err != nil {
 				fmt.Println("Error!", err)
 			} else {
-
+				// Now that we have basic EXIF data from the file, we need to get the year,
+				//  numeric month and day so the storage path can be constructed.
 				t, err := fileExif.DateTime()
 				if err != nil {
-					fmt.Println("Error!", err)
+					log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Warn("Error!", err)
 				}
 				fileYear = t.Year()
 				fileMonth = int(t.Month())
 				fileDay = t.Day()
 
-				folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", storagePath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
-				filePath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", storagePath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
-				// fmt.Println(folderPath, filePath)
+				folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
+				filePath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
+
+				if fileYear == 1 {
+					// Could not detect the EXIF date data, use a hash to override
+					filePath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
+				}
 
 				os.MkdirAll(folderPath, os.ModePerm)
 
-				// fmt.Printf("New path: %s/%d/%d-%02d/%d-%02d-%02d/%s\n",
-				//	storagePath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
-				copyFileContents(j, filePath)
-				fmt.Println("copy ", j, filePath)
+				log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fh.hash}).Info("Copying file to long term storage")
+				copyFileContents(fh.path, filePath)
 			}
 
-			fh.path = j
-			fh.hash = h.Sum(nil)
-
-			fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
+			log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Info("Adding file to database")
+			// fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
 
 			db.Update(func(tx *bolt.Tx) error {
 				h2p := tx.Bucket([]byte("PhotosHash2Path"))
@@ -234,7 +264,6 @@ func walkFilePath(path string, jobs chan<- string) {
 func main() {
 	var workers int
 	workers = 5
-	fmt.Println("Starting up")
 
 	var err error
 
@@ -288,11 +317,16 @@ func main() {
 		go nfsStorageWorker(w, nfs, results, db)
 	}
 
-	walkFilePath(storagePath, nfs)
+	dstPathStr := *dstPath
+	log.Info("Setting dstPath to ", dstPathStr)
+	walkFilePath(dstPathStr, nfs)
 
 	for true {
-		walkFilePath("/Users/bwdezend/Pictures/Photos Library.photoslibrary/Masters/2020", jobs)
-		fmt.Println("looping")
-		time.Sleep(time.Second * 90)
+		t := time.Now()
+		walkPath := fmt.Sprintf("%s/%04d/%02d", *srcPath, t.Year(), int(t.Month()))
+		log.Debug("Setting walkPath to ", walkPath)
+		walkFilePath(walkPath, jobs)
+		log.Info("looping")
+		time.Sleep(time.Second * time.Duration(*sleepInterval))
 	}
 }
