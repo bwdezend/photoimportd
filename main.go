@@ -4,19 +4,20 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
-	"github.com/rwcarlsen/goexif/exif"
-	log "github.com/sirupsen/logrus"
-	bolt "go.etcd.io/bbolt"
 	"io"
 	"os"
 	"os/user"
 	"path/filepath"
 	"time"
+
+	"github.com/rwcarlsen/goexif/exif"
+	log "github.com/sirupsen/logrus"
+	bolt "go.etcd.io/bbolt"
 )
 
 var dstPath = flag.String("dst", "/mnt/nfs/photos/golang-test", "Long term storage path")
 var srcPath = flag.String("src", "", "Photo library Master path")
-var dbPath  = flag.String("db", "photo.db", "Database path")
+var dbPath = flag.String("db", "photo.db", "Database path")
 var debugEnabled = flag.Bool("debug", false, "Turn on debug")
 var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
@@ -34,13 +35,15 @@ func init() {
 	log.Warn("Starting Up")
 
 	usr, err := user.Current()
-    if err != nil {
-        log.Fatal( err )
-    }
-    
-    if *srcPath == "" {
-    	*srcPath = usr.HomeDir + "/Pictures/Photos Library.photoslibrary/Masters"
-    }
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Assume this is a macOS host that's using iCloud Photo Library
+	//  _and_ that all photos and videos will be routed through here
+	if *srcPath == "" {
+		*srcPath = usr.HomeDir + "/Pictures/Photos Library.photoslibrary/Masters"
+	}
 
 	// Output to stdout instead of the default stderr
 	// Can be any io.Writer, see below for File example
@@ -189,7 +192,6 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 					return nil
 				})
 
-			
 			}
 			f.Close()
 		}
@@ -264,7 +266,7 @@ func walkFilePath(path string, jobs chan<- string) {
 		}
 
 		if info.IsDir() == false {
-			log.WithFields(log.Fields{"path":path}).Trace("Found file in src path scan")
+			log.WithFields(log.Fields{"path": path}).Trace("Found file in src path scan")
 			jobs <- path
 		}
 
