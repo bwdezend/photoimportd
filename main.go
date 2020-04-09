@@ -9,13 +9,16 @@ import (
 	bolt "go.etcd.io/bbolt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"time"
 )
 
 var dstPath = flag.String("dst", "/mnt/nfs/photos/golang-test", "Long term storage path")
-var srcPath = flag.String("src", "/Users/bwdezend/Pictures/Photos Library.photoslibrary/Masters", "Photo library Master path")
+var srcPath = flag.String("src", "", "Photo library Master path")
+var dbPath  = flag.String("db", "photo.db", "Database path")
 var debugEnabled = flag.Bool("debug", false, "Turn on debug")
+var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
 
 type fileHash struct {
@@ -30,6 +33,15 @@ func init() {
 	log.SetFormatter(&log.JSONFormatter{})
 	log.Warn("Starting Up")
 
+	usr, err := user.Current()
+    if err != nil {
+        log.Fatal( err )
+    }
+    
+    if *srcPath == "" {
+    	*srcPath = usr.HomeDir + "/Pictures/Photos Library.photoslibrary/Masters"
+    }
+
 	// Output to stdout instead of the default stderr
 	// Can be any io.Writer, see below for File example
 	log.SetOutput(os.Stdout)
@@ -43,6 +55,8 @@ func init() {
 	}
 
 	log.Info("Sleep interval set to ", *sleepInterval, " seconds")
+	log.Info("Source Path Set to: ", *srcPath)
+	log.Info("Destination Path to: ", *dstPath)
 }
 
 func lookupHash(path string, bucket string, db *bolt.DB) []byte {
@@ -62,7 +76,7 @@ func lookupHash(path string, bucket string, db *bolt.DB) []byte {
 func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
 
-		h := lookupHash(j, "NFSPath2Hash", db)
+		h := lookupHash(j, "dstPath2Hash", db)
 		if h == nil {
 			var fh fileHash
 			h := sha256.New()
@@ -82,12 +96,12 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			// fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
 
 			db.Update(func(tx *bolt.Tx) error {
-				h2p := tx.Bucket([]byte("NFSHash2Path"))
+				h2p := tx.Bucket([]byte("dstHash2Path"))
 				err := h2p.Put([]byte(fh.hash), []byte(fh.path))
 				if err != nil {
 					fmt.Println("Error!")
 				}
-				p2h := tx.Bucket([]byte("NFSPath2Hash"))
+				p2h := tx.Bucket([]byte("dstPath2Hash"))
 				err = p2h.Put([]byte(fh.path), []byte(fh.hash))
 				if err != nil {
 					fmt.Println("Error!")
@@ -103,10 +117,10 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
 
-		h := lookupHash(j, "PhotosPath2Hash", db)
+		h := lookupHash(j, "srcPathSeen", db)
 
 		if h != nil {
-			// fmt.Printf("db returned hash is %x\n", h)
+			log.WithFields(log.Fields{"hash": fmt.Sprintf("%x", h)}).Trace("db returned existing hash")
 		} else {
 			var fh fileHash
 			h := sha256.New()
@@ -129,12 +143,12 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 
 			exifRead, err := os.Open(j)
 			if err != nil {
-				fmt.Println("Error!", err)
+				log.Error("Error! ", err)
 			}
 
 			fileExif, err := exif.Decode(exifRead)
 			if err != nil {
-				fmt.Println("Error!", err)
+				log.Error("Error! ", err)
 			} else {
 				// Now that we have basic EXIF data from the file, we need to get the year,
 				//  numeric month and day so the storage path can be constructed.
@@ -146,37 +160,37 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 				fileMonth = int(t.Month())
 				fileDay = t.Day()
 
-				folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
-				filePath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
+				folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
+				filePath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
 
 				if fileYear == 1 {
 					// Could not detect the EXIF date data, use a hash to override
 					filePath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
 				}
 
-				os.MkdirAll(folderPath, os.ModePerm)
-
-				log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fh.hash}).Info("Copying file to long term storage")
-				copyFileContents(fh.path, filePath)
+				if *dryrunEnabled == false {
+					os.MkdirAll(folderPath, os.ModePerm)
+					log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fh.hash}).Info("Copying file to long term storage")
+					copyFileContents(fh.path, filePath)
+				} else {
+					log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fh.hash}).Info("Would have copied file to long term storage")
+				}
 			}
 
-			log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Info("Adding file to database")
-			// fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
+			if *dryrunEnabled == false {
+				log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Info("Adding file to database")
 
-			db.Update(func(tx *bolt.Tx) error {
-				h2p := tx.Bucket([]byte("PhotosHash2Path"))
-				err := h2p.Put([]byte(fh.hash), []byte(fh.path))
-				if err != nil {
-					fmt.Println("Error!")
-				}
-				p2h := tx.Bucket([]byte("PhotosPath2Hash"))
-				err = p2h.Put([]byte(fh.path), []byte(fh.hash))
-				if err != nil {
-					fmt.Println("Error!")
-				}
-				return nil
-			})
+				db.Update(func(tx *bolt.Tx) error {
+					seen := tx.Bucket([]byte("srcPathSeen"))
+					err := seen.Put([]byte(fh.path), []byte(fh.hash))
+					if err != nil {
+						fmt.Println("Error!")
+					}
+					return nil
+				})
 
+			
+			}
 			f.Close()
 		}
 	}
@@ -250,6 +264,7 @@ func walkFilePath(path string, jobs chan<- string) {
 		}
 
 		if info.IsDir() == false {
+			log.WithFields(log.Fields{"path":path}).Trace("Found file in src path scan")
 			jobs <- path
 		}
 
@@ -267,14 +282,14 @@ func main() {
 
 	var err error
 
-	db, err := bolt.Open("photo.db", 0600, nil)
+	db, err := bolt.Open(*dbPath, 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
 	db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte("PhotosHash2Path"))
+		_, err := tx.CreateBucket([]byte("srcPathSeen"))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
 		}
@@ -282,7 +297,7 @@ func main() {
 	})
 
 	db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte("PhotosPath2Hash"))
+		_, err := tx.CreateBucket([]byte("dstHash2Path"))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
 		}
@@ -290,15 +305,7 @@ func main() {
 	})
 
 	db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte("NFSHash2Path"))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-		return nil
-	})
-
-	db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte("NFSPath2Hash"))
+		_, err := tx.CreateBucket([]byte("dstPath2Hash"))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
 		}

@@ -31,7 +31,7 @@ go_lint:
 
 
 debug:
-	go run *go -debug
+	go run *go -debug -sleep 30
 
 run:
 	go run *go 
