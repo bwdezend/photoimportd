@@ -35,3 +35,8 @@ debug:
 
 run:
 	go run *go 
+
+
+clean:
+	find . -type d -name "*string*" -exec rm -rf {} \;
+	rm photoimportd

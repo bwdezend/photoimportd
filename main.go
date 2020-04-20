@@ -54,7 +54,7 @@ func init() {
 		log.Debug("Debug Logging Enabled")
 	} else {
 		// Only log the warning severity or above.
-		log.SetLevel(log.WarnLevel)
+		log.SetLevel(log.InfoLevel)
 	}
 
 	log.Info("Sleep interval set to ", *sleepInterval, " seconds")
@@ -79,8 +79,11 @@ func lookupHash(path string, bucket string, db *bolt.DB) []byte {
 func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
 
-		h := lookupHash(j, "dstPath2Hash", db)
-		if h == nil {
+		lookedUpHash := lookupHash(j, "dstPath2Hash", db)
+
+		if lookedUpHash == nil {
+			log.WithFields(log.Fields{"hash": lookedUpHash, "path": j}).Info("Hashing of file")
+
 			var fh fileHash
 			h := sha256.New()
 
@@ -95,7 +98,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			fh.path = j
 			fh.hash = h.Sum(nil)
 
-			log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Info("Adding file to database")
+			log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Info("Adding unseen file to database")
 			// fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
 
 			db.Update(func(tx *bolt.Tx) error {
