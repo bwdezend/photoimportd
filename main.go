@@ -171,7 +171,7 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 
 				if fileYear == 1 {
 					// Could not detect the EXIF date data, use a hash to override
-					filePath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
+					filePath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", *dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
 				}
 
 				if *dryrunEnabled == false {
