@@ -1,4 +1,4 @@
-build:
+build: check
 	go build -o photoimportd *go 
 
 
