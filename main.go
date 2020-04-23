@@ -15,12 +15,13 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var dstPath = flag.String("dst", "/mnt/nfs/photos/golang-test", "Long term storage path")
+var dstPath = flag.String("dst", "/mnt/nfs/photos/MasterImages", "Long term storage path")
 var srcPath = flag.String("src", "", "Photo library Master path")
 var dbPath = flag.String("db", "photo.db", "Database path")
 var debugEnabled = flag.Bool("debug", false, "Turn on debug")
 var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
+var workerCount = flag.Int("workers", 5, "Number of worker threads to run concurrently")
 
 type fileHash struct {
 	path string
@@ -58,6 +59,7 @@ func init() {
 	}
 
 	log.Info("Sleep interval set to ", *sleepInterval, " seconds")
+	log.Info("Worker count set to ", *workerCount, " threads")
 	log.Info("Source Path Set to: ", *srcPath)
 	log.Info("Destination Path to: ", *dstPath)
 }
@@ -82,7 +84,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 		lookedUpHash := lookupHash(j, "dstPath2Hash", db)
 
 		if lookedUpHash == nil {
-			log.WithFields(log.Fields{"hash": lookedUpHash, "path": j}).Info("Hashing of file")
+			log.WithFields(log.Fields{"hash": lookedUpHash, "path": j}).Trace("Looked up hash of dstPath file")
 
 			var fh fileHash
 			h := sha256.New()
@@ -91,15 +93,12 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.WithFields(log.Fields{"path": j}).Info("Hashing unseen file")
+			log.WithFields(log.Fields{"path": j}).Info("Hashing unseen dstPath file")
 			if _, err := io.Copy(h, f); err != nil {
 				log.Fatal(err)
 			}
 			fh.path = j
 			fh.hash = h.Sum(nil)
-
-			log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Info("Adding unseen file to database")
-			// fmt.Printf("Adding file [%x] to db - path %s\n", fh.hash, fh.path)
 
 			db.Update(func(tx *bolt.Tx) error {
 				h2p := tx.Bucket([]byte("dstHash2Path"))
@@ -112,6 +111,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 				if err != nil {
 					fmt.Println("Error!")
 				}
+				log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Debug("Added unseen dstPath file to database")
 				return nil
 			})
 
@@ -282,9 +282,6 @@ func walkFilePath(path string, jobs chan<- string) {
 }
 
 func main() {
-	var workers int
-	workers = 5
-
 	var err error
 
 	db, err := bolt.Open(*dbPath, 0600, nil)
@@ -321,11 +318,11 @@ func main() {
 	results := make(chan fileHash, 10)
 	nfs := make(chan string, 200)
 
-	for w := 1; w <= workers; w++ {
+	for w := 1; w <= *workerCount; w++ {
 		go hashFileWorker(w, jobs, results, db)
 	}
 
-	for w := 1; w <= workers; w++ {
+	for w := 1; w <= *workerCount; w++ {
 		go nfsStorageWorker(w, nfs, results, db)
 	}
 
