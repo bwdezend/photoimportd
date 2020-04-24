@@ -326,16 +326,17 @@ func main() {
 		go nfsStorageWorker(w, nfs, results, db)
 	}
 
-	dstPathStr := *dstPath
-	log.Info("Setting dstPath to ", dstPathStr)
-	walkFilePath(dstPathStr, nfs)
-
 	for true {
 		t := time.Now()
+
+		dstPathStr := fmt.Sprintf("%s/%04d/%04d-%02d", *dstPath, t.Year(), t.Year(), int(t.Month()))
+		log.Trace("Setting dstPath to ", dstPathStr)
+		walkFilePath(dstPathStr, nfs)
+
 		walkPath := fmt.Sprintf("%s/%04d/%02d", *srcPath, t.Year(), int(t.Month()))
-		log.Debug("Setting walkPath to ", walkPath)
+		log.Trace("Setting walkPath to ", walkPath)
 		walkFilePath(walkPath, jobs)
-		log.Info("looping")
+		log.Debug("looping")
 		time.Sleep(time.Second * time.Duration(*sleepInterval))
 	}
 }
