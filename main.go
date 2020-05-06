@@ -336,10 +336,13 @@ func main() {
 
 		dstPathStr := fmt.Sprintf("%s/%04d/%04d-%02d", *dstPath, t.Year(), t.Year(), int(t.Month()))
 		log.Trace("Setting dstPath to ", dstPathStr)
+		// Make sure dstPathStr exists before trying to walk it, happens when date rolls over and new path doesn't yet exist
+		os.MkdirAll(dstPathStr, os.ModePerm)
 		walkFilePath(dstPathStr, nfs)
 
 		walkPath := fmt.Sprintf("%s/%04d/%02d", *srcPath, t.Year(), int(t.Month()))
 		log.Trace("Setting walkPath to ", walkPath)
+		os.MkdirAll(walkPath, os.ModePerm)
 		walkFilePath(walkPath, jobs)
 		log.Debug("looping")
 		time.Sleep(time.Second * time.Duration(*sleepInterval))
