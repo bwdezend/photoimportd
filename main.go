@@ -17,7 +17,7 @@ import (
 
 var dstPath = flag.String("dst", "/mnt/nfs/photos/MasterImages", "Long term storage path")
 var srcPath = flag.String("src", "", "Photo library Master path")
-var dbPath = flag.String("db", "photo.db", "Database path")
+var dbPath = flag.String("db", "", "Database path")
 var debugEnabled = flag.Bool("debug", false, "Turn on debug")
 var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
@@ -46,6 +46,10 @@ func init() {
 		*srcPath = usr.HomeDir + "/Pictures/Photos Library.photoslibrary/Masters"
 	}
 
+	if *dbPath == "" {
+		*dbPath = usr.HomeDir + "/.photoimportd.db"
+	}
+
 	// Output to stdout instead of the default stderr
 	// Can be any io.Writer, see below for File example
 	log.SetOutput(os.Stdout)
@@ -60,6 +64,7 @@ func init() {
 
 	log.Info("Sleep interval set to ", *sleepInterval, " seconds")
 	log.Info("Worker count set to ", *workerCount, " threads")
+	log.Info("Database Path Set to: ", *dbPath)
 	log.Info("Source Path Set to: ", *srcPath)
 	log.Info("Destination Path to: ", *dstPath)
 }
