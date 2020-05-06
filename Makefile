@@ -37,6 +37,10 @@ run:
 	go run *go 
 
 
+test:
+	rm test.db
+	go run *go -debug -db test.db -dst out
+
 clean:
 	find . -type d -name "*string*" -exec rm -rf {} \;
 	rm photoimportd
