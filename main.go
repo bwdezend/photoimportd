@@ -296,15 +296,7 @@ func walkFilePath(path string, jobs chan<- string) {
 	}
 }
 
-func main() {
-	var err error
-
-	db, err := bolt.Open(*dbPath, 0600, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-
+func setupDatabase(db *bolt.DB) {
 	db.Update(func(tx *bolt.Tx) error {
 		_, err := tx.CreateBucket([]byte("srcPathSeen"))
 		if err != nil {
@@ -328,6 +320,19 @@ func main() {
 		}
 		return nil
 	})
+
+}
+
+func main() {
+	var err error
+
+	db, err := bolt.Open(*dbPath, 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	setupDatabase(db)
 
 	jobs := make(chan string, 200)
 	results := make(chan fileHash, 10)
