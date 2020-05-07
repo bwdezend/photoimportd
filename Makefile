@@ -1,3 +1,5 @@
+.PHONY: test
+
 build: check
 	go build -o photoimportd *go 
 
@@ -37,10 +39,19 @@ run:
 	go run *go 
 
 
+install:
+	cp photoimportd /usr/local/bin/photoimportd 
+	chmod +x /usr/local/bin/photoimportd
+
+deploy: build install
+
 test:
-	rm test.db
-	go run *go -debug -db test.db -dst out
+	-rm test/test.db
+	go run *go -debug -db test/test.db -dst test/out -src test/in
 
 clean:
 	find . -type d -name "*string*" -exec rm -rf {} \;
 	rm photoimportd
+	rm -rf test/test.db
+	rm -rf test/in
+	rm -rf test/out
