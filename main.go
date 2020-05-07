@@ -81,15 +81,20 @@ func init() {
 
 func lookupHash(path string, bucket string, db *bolt.DB) []byte {
 	var hash []byte
+	var exists bool
 	db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		v := b.Get([]byte(path))
 		if v != nil {
 			log.WithFields(log.Fields{"path": path, "hash": fmt.Sprintf("%x", v)}).Trace("hash exists")
 			hash = v
+			exists = true
+		} else {
+			exists = false
 		}
 		return nil
 	})
+	log.WithFields(log.Fields{"path": path, "exists": exists, "hash": fmt.Sprintf("%x", hash)}).Trace(fmt.Sprintf("lookupHash checked on %s", path))
 	return hash
 }
 
@@ -108,7 +113,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.WithFields(log.Fields{"path": j}).Info("Hashing unseen dstPath file")
+			log.WithFields(log.Fields{"path": j}).Debug("Hashing unseen dstPath file")
 			if _, err := io.Copy(h, f); err != nil {
 				log.Fatal(err)
 			}
@@ -126,7 +131,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 				if err != nil {
 					fmt.Println("Error!")
 				}
-				log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Debug("Added unseen dstPath file to database")
+				log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Added unseen dstPath file to database")
 				return nil
 			})
 
@@ -279,7 +284,7 @@ func copyFileContents(src, dst string) (err error) {
 func walkFilePath(path string, jobs chan<- string) {
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			// fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", path, err)
+			log.WithFields(log.Fields{"path": path, "err": err}).Warn(fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", path, err))
 			// return err
 		}
 
@@ -359,7 +364,7 @@ func main() {
 		log.Trace("Setting walkPath to ", walkPath)
 		os.MkdirAll(walkPath, os.ModePerm)
 		walkFilePath(walkPath, jobs)
-		log.Debug("looping")
+		log.Trace("looping")
 		time.Sleep(time.Second * time.Duration(*sleepInterval))
 	}
 }
