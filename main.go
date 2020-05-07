@@ -15,10 +15,17 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+var usr, usrErr = user.Current()
+
+// Assume this is a macOS host that's using iCloud Photo Library
+//  _and_ that all photos and videos will be routed through here
+var srcPath = flag.String("src", usr.HomeDir+"/Pictures/Photos Library.photoslibrary/Masters", "Photo library Master path")
+
 var dstPath = flag.String("dst", "/mnt/nfs/photos/MasterImages", "Long term storage path")
-var srcPath = flag.String("src", "", "Photo library Master path")
-var dbPath = flag.String("db", "", "Database path")
-var debugEnabled = flag.Bool("debug", false, "Turn on debug")
+var dbPath = flag.String("db", usr.HomeDir+"/.photoimportd.db", "Database path")
+
+var debugEnabled = flag.Bool("debug", false, "Turn on debug level logging")
+var traceEnabled = flag.Bool("trace", false, "Turn on trace level logging")
 var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
 var workerCount = flag.Int("workers", 5, "Number of worker threads to run concurrently")
@@ -35,9 +42,9 @@ func init() {
 	log.SetFormatter(&log.JSONFormatter{})
 	log.Warn("Starting Up")
 
-	usr, err := user.Current()
-	if err != nil {
-		log.Fatal(err)
+	//usr, err := user.Current()
+	if usrErr != nil {
+		log.Fatal(usrErr)
 	}
 
 	// Assume this is a macOS host that's using iCloud Photo Library
@@ -54,7 +61,10 @@ func init() {
 	// Can be any io.Writer, see below for File example
 	log.SetOutput(os.Stdout)
 
-	if *debugEnabled {
+	if *traceEnabled {
+		log.SetLevel(log.TraceLevel)
+		log.Trace("Trace Logging Enabled")
+	} else if *debugEnabled {
 		log.SetLevel(log.DebugLevel)
 		log.Debug("Debug Logging Enabled")
 	} else {
