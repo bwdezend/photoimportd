@@ -99,7 +99,7 @@ func hashExists(hash []byte, bucket string, db *bolt.DB) bool {
 		}
 		return nil
 	})
-	log.WithFields(log.Fields{"hashExists": exists, "bucket": bucket, "checkedHash": fmt.Sprintf("%x", hash)}).Debug(fmt.Sprintf("hashExists: %v", exists))
+	log.WithFields(log.Fields{"hashExists": exists, "bucket": bucket, "checkedHash": fmt.Sprintf("%x", hash)}).Trace(fmt.Sprintf("hashExists: %v", exists))
 	return exists
 }
 
@@ -171,8 +171,9 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			fh.hash = h.Sum(nil)
 
 			dstSeen := hashExists(fh.hash, "dstHash2Path", db)
-			if dstSeen == false {
-
+			if dstSeen == true {
+				log.WithFields(log.Fields{"hash": fmt.Sprintf("%x", fh.hash)}).Trace("dstPath check returned existing hash")
+			} else {
 				exifRead, err := os.Open(j)
 				if err != nil {
 					log.Error("Error! ", err)
@@ -208,19 +209,17 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 						log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
 					}
 				}
-
-				if *dryrunEnabled == false {
-					log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding file to srcPathSeen database")
-
-					db.Update(func(tx *bolt.Tx) error {
-						seen := tx.Bucket([]byte("srcPathSeen"))
-						err := seen.Put([]byte(fh.path), []byte(fh.hash))
-						if err != nil {
-							fmt.Println("Error!")
-						}
-						return nil
-					})
-				}
+			}
+			if *dryrunEnabled == false {
+				log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding file to srcPathSeen database")
+				db.Update(func(tx *bolt.Tx) error {
+					seen := tx.Bucket([]byte("srcPathSeen"))
+					err := seen.Put([]byte(fh.path), []byte(fh.hash))
+					if err != nil {
+						fmt.Println("Error!")
+					}
+					return nil
+				})
 			}
 			f.Close()
 		}
