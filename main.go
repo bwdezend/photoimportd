@@ -47,16 +47,6 @@ func init() {
 		log.Fatal(usrErr)
 	}
 
-	// Assume this is a macOS host that's using iCloud Photo Library
-	//  _and_ that all photos and videos will be routed through here
-	if *srcPath == "" {
-		*srcPath = usr.HomeDir + "/Pictures/Photos Library.photoslibrary/Masters"
-	}
-
-	if *dbPath == "" {
-		*dbPath = usr.HomeDir + "/.photoimportd.db"
-	}
-
 	// Output to stdout instead of the default stderr
 	// Can be any io.Writer, see below for File example
 	log.SetOutput(os.Stdout)
