@@ -86,7 +86,6 @@ func lookupHash(path string, bucket string, db *bolt.DB) []byte {
 		b := tx.Bucket([]byte(bucket))
 		v := b.Get([]byte(path))
 		if v != nil {
-			log.WithFields(log.Fields{"path": path, "hash": fmt.Sprintf("%x", v)}).Trace("hash exists")
 			hash = v
 			exists = true
 		} else {
@@ -96,6 +95,22 @@ func lookupHash(path string, bucket string, db *bolt.DB) []byte {
 	})
 	log.WithFields(log.Fields{"path": path, "exists": exists, "hash": fmt.Sprintf("%x", hash)}).Trace(fmt.Sprintf("lookupHash checked on %s", path))
 	return hash
+}
+
+func hashExists(hash []byte, bucket string, db *bolt.DB) bool {
+	var exists bool
+	db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		v := b.Get([]byte(hash))
+		if v != nil {
+			exists = true
+		} else {
+			exists = false
+		}
+		return nil
+	})
+	log.WithFields(log.Fields{"hashExists": exists, "bucket": bucket, "checkedHash": fmt.Sprintf("%x", hash)}).Debug(fmt.Sprintf("hashExists: %v", exists))
+	return exists
 }
 
 func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
@@ -143,10 +158,9 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
 
-		h := lookupHash(j, "srcPathSeen", db)
-
-		if h != nil {
-			log.WithFields(log.Fields{"hash": fmt.Sprintf("%x", h)}).Trace("db returned existing hash")
+		srcSeen := lookupHash(j, "srcPathSeen", db)
+		if len(srcSeen) != 0 {
+			log.WithFields(log.Fields{"hash": fmt.Sprintf("%x", srcSeen)}).Trace("srcPath check returned existing hash")
 		} else {
 			var fh fileHash
 			h := sha256.New()
@@ -159,7 +173,6 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			if err != nil {
 				log.Fatal(err)
 			}
-			// fmt.Printf("%d Hashing unseen file: %s\n", len(jobs), j)
 			if _, err := io.Copy(h, f); err != nil {
 				log.WithFields(log.Fields{"path": j}).Fatal("Error!", err)
 			}
@@ -167,54 +180,57 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			fh.path = j
 			fh.hash = h.Sum(nil)
 
-			exifRead, err := os.Open(j)
-			if err != nil {
-				log.Error("Error! ", err)
-			}
+			dstSeen := hashExists(fh.hash, "dstHash2Path", db)
+			if dstSeen == false {
 
-			fileExif, err := exif.Decode(exifRead)
-			if err != nil {
-				log.Error("Error! ", err)
-			} else {
-				// Now that we have basic EXIF data from the file, we need to get the year,
-				//  numeric month and day so the storage path can be constructed.
-				t, err := fileExif.DateTime()
+				exifRead, err := os.Open(j)
 				if err != nil {
-					log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Warn("Error!", err)
+					log.Error("Error! ", err)
 				}
-				fileYear = t.Year()
-				fileMonth = int(t.Month())
-				fileDay = t.Day()
 
-				folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
-				filePath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
+				fileExif, err := exif.Decode(exifRead)
+				if err != nil {
+					log.Error("Error! ", err)
+				} else {
+					// Now that we have basic EXIF data from the file, we need to get the year,
+					//  numeric month and day so the storage path can be constructed.
+					t, err := fileExif.DateTime()
+					if err != nil {
+						log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Warn("Error! ", err)
+					}
+					fileYear = t.Year()
+					fileMonth = int(t.Month())
+					fileDay = t.Day()
 
-				if fileYear == 1 {
-					// Could not detect the EXIF date data, use a hash to override
-					filePath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", *dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
+					folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
+					filePath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
+
+					if fileYear == 1 {
+						// Could not detect the EXIF date data, use a hash to override
+						filePath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", *dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
+					}
+
+					if *dryrunEnabled == false {
+						os.MkdirAll(folderPath, os.ModePerm)
+						log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
+						copyFileContents(fh.path, filePath)
+					} else {
+						log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
+					}
 				}
 
 				if *dryrunEnabled == false {
-					os.MkdirAll(folderPath, os.ModePerm)
-					log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fh.hash}).Info("Copying file to long term storage")
-					copyFileContents(fh.path, filePath)
-				} else {
-					log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fh.hash}).Info("Would have copied file to long term storage")
+					log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding file to srcPathSeen database")
+
+					db.Update(func(tx *bolt.Tx) error {
+						seen := tx.Bucket([]byte("srcPathSeen"))
+						err := seen.Put([]byte(fh.path), []byte(fh.hash))
+						if err != nil {
+							fmt.Println("Error!")
+						}
+						return nil
+					})
 				}
-			}
-
-			if *dryrunEnabled == false {
-				log.WithFields(log.Fields{"path": fh.path, "hash": fh.hash}).Info("Adding file to database")
-
-				db.Update(func(tx *bolt.Tx) error {
-					seen := tx.Bucket([]byte("srcPathSeen"))
-					err := seen.Put([]byte(fh.path), []byte(fh.hash))
-					if err != nil {
-						fmt.Println("Error!")
-					}
-					return nil
-				})
-
 			}
 			f.Close()
 		}
