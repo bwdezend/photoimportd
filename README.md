@@ -2,6 +2,7 @@
 
 A daemon to run on macOS and backup Photos Library Masters to a remote storage location, sorted by EXIF dates.
 
+```
 Usage of photoimportd:
   -db string
     	Database path (default "~/.photoimportd.db")
@@ -19,3 +20,4 @@ Usage of photoimportd:
     	Turn on trace level logging
   -workers int
     	Number of worker threads to run concurrently (default 5)
+```
