@@ -125,6 +125,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			fh.path = j
 			fh.hash = h.Sum(nil)
 
+			// This needs to be refactored into a dedicated database update function
 			db.Update(func(tx *bolt.Tx) error {
 				h2p := tx.Bucket([]byte("dstHash2Path"))
 				err := h2p.Put([]byte(fh.hash), []byte(fh.path))
@@ -212,6 +213,7 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			}
 			if *dryrunEnabled == false {
 				log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding file to srcPathSeen database")
+				// This needs to be refactored into a dedicated database update function
 				db.Update(func(tx *bolt.Tx) error {
 					seen := tx.Bucket([]byte("srcPathSeen"))
 					err := seen.Put([]byte(fh.path), []byte(fh.hash))
