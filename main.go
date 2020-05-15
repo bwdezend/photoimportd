@@ -103,6 +103,23 @@ func hashExists(hash []byte, bucket string, db *bolt.DB) bool {
 	return exists
 }
 
+func updateDstPath(fh fileHash, db *bolt.DB) {
+	db.Update(func(tx *bolt.Tx) error {
+		h2p := tx.Bucket([]byte("dstHash2Path"))
+		err := h2p.Put(fh.hash, []byte(fh.path))
+		if err != nil {
+			fmt.Println("Error!")
+		}
+		p2h := tx.Bucket([]byte("dstPath2Hash"))
+		err = p2h.Put([]byte(fh.path), fh.hash)
+		if err != nil {
+			fmt.Println("Error!")
+		}
+		log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding unseen dstPath file to database")
+		return nil
+	})
+}
+
 func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
 
@@ -125,22 +142,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			fh.path = j
 			fh.hash = h.Sum(nil)
 
-			// This needs to be refactored into a dedicated database update function
-			db.Update(func(tx *bolt.Tx) error {
-				h2p := tx.Bucket([]byte("dstHash2Path"))
-				err := h2p.Put([]byte(fh.hash), []byte(fh.path))
-				if err != nil {
-					fmt.Println("Error!")
-				}
-				p2h := tx.Bucket([]byte("dstPath2Hash"))
-				err = p2h.Put([]byte(fh.path), []byte(fh.hash))
-				if err != nil {
-					fmt.Println("Error!")
-				}
-				log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Added unseen dstPath file to database")
-				return nil
-			})
-
+			updateDstPath(fh, db)
 			f.Close()
 		}
 	}
@@ -154,6 +156,7 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 			log.WithFields(log.Fields{"hash": fmt.Sprintf("%x", srcSeen)}).Trace("srcPath check returned existing hash")
 		} else {
 			var fh fileHash
+			var dstFh fileHash
 			h := sha256.New()
 
 			fileYear := 0
@@ -170,6 +173,7 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 
 			fh.path = j
 			fh.hash = h.Sum(nil)
+			dstFh.hash = fh.hash
 
 			dstSeen := hashExists(fh.hash, "dstHash2Path", db)
 			if dstSeen == true {
@@ -195,19 +199,20 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 					fileDay = t.Day()
 
 					folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
-					filePath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
+					dstFh.path = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
 
 					if fileYear == 1 {
 						// Could not detect the EXIF date data, use a hash to override
-						filePath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", *dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
+						dstFh.path = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", *dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
 					}
 
 					if *dryrunEnabled == false {
 						os.MkdirAll(folderPath, os.ModePerm)
-						log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
-						copyFileContents(fh.path, filePath)
+						log.WithFields(log.Fields{"path": fh.path, "nfsPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
+						copyFileContents(fh.path, dstFh.path)
+						updateDstPath(dstFh, db)
 					} else {
-						log.WithFields(log.Fields{"path": fh.path, "nfsPath": filePath, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
+						log.WithFields(log.Fields{"path": fh.path, "nfsPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
 					}
 				}
 			}
