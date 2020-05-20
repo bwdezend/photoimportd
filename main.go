@@ -103,7 +103,7 @@ func hashExists(hash []byte, bucket string, db *bolt.DB) bool {
 	return exists
 }
 
-func updateDstPath(fh fileHash, db *bolt.DB) {
+func updateDstPathDB(fh fileHash, db *bolt.DB) {
 	db.Update(func(tx *bolt.Tx) error {
 		h2p := tx.Bucket([]byte("dstHash2Path"))
 		err := h2p.Put(fh.hash, []byte(fh.path))
@@ -120,7 +120,19 @@ func updateDstPath(fh fileHash, db *bolt.DB) {
 	})
 }
 
-func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
+func updateSrcPathDB(fh fileHash, db *bolt.DB) {
+	db.Update(func(tx *bolt.Tx) error {
+		seen := tx.Bucket([]byte("srcPathSeen"))
+		err := seen.Put([]byte(fh.path), []byte(fh.hash))
+		if err != nil {
+			fmt.Println("Error!")
+		}
+		return nil
+	})
+	log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding unseen srcPath file to database")
+}
+
+func dstStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
 
 		lookedUpHash := lookupHash(j, "dstPath2Hash", db)
@@ -142,7 +154,7 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			fh.path = j
 			fh.hash = h.Sum(nil)
 
-			updateDstPath(fh, db)
+			updateDstPathDB(fh, db)
 			f.Close()
 		}
 	}
@@ -150,7 +162,6 @@ func nfsStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 
 func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
-
 		srcSeen := lookupHash(j, "srcPathSeen", db)
 		if len(srcSeen) != 0 {
 			log.WithFields(log.Fields{"hash": fmt.Sprintf("%x", srcSeen)}).Trace("srcPath check returned existing hash")
@@ -168,7 +179,7 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 				log.Fatal(err)
 			}
 			if _, err := io.Copy(h, f); err != nil {
-				log.WithFields(log.Fields{"path": j}).Fatal("Error!", err)
+				log.WithFields(log.Fields{"path": j}).Fatal("Error copying file!", err)
 			}
 
 			fh.path = j
@@ -208,25 +219,17 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 
 					if *dryrunEnabled == false {
 						os.MkdirAll(folderPath, os.ModePerm)
-						log.WithFields(log.Fields{"path": fh.path, "nfsPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
+						log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
 						copyFileContents(fh.path, dstFh.path)
-						updateDstPath(dstFh, db)
+						updateDstPathDB(dstFh, db)
 					} else {
-						log.WithFields(log.Fields{"path": fh.path, "nfsPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
+						log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
 					}
 				}
 			}
 			if *dryrunEnabled == false {
 				log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding file to srcPathSeen database")
-				// This needs to be refactored into a dedicated database update function
-				db.Update(func(tx *bolt.Tx) error {
-					seen := tx.Bucket([]byte("srcPathSeen"))
-					err := seen.Put([]byte(fh.path), []byte(fh.hash))
-					if err != nil {
-						fmt.Println("Error!")
-					}
-					return nil
-				})
+				updateSrcPathDB(fh, db)
 			}
 			f.Close()
 		}
@@ -301,7 +304,7 @@ func walkFilePath(path string, jobs chan<- string) {
 		}
 
 		if info.IsDir() == false {
-			log.WithFields(log.Fields{"path": path}).Trace("Found file in src path scan")
+			log.WithFields(log.Fields{"path": path}).Trace("Found file in path scan")
 			jobs <- path
 		}
 
@@ -353,14 +356,14 @@ func main() {
 
 	jobs := make(chan string, 200)
 	results := make(chan fileHash, 10)
-	nfs := make(chan string, 200)
+	dst := make(chan string, 200)
 
 	for w := 1; w <= *workerCount; w++ {
 		go hashFileWorker(w, jobs, results, db)
 	}
 
 	for w := 1; w <= *workerCount; w++ {
-		go nfsStorageWorker(w, nfs, results, db)
+		go dstStorageWorker(w, dst, results, db)
 	}
 
 	for true {
@@ -370,7 +373,7 @@ func main() {
 		log.Trace("Setting dstPath to ", dstPathStr)
 		// Make sure dstPathStr exists before trying to walk it, happens when date rolls over and new path doesn't yet exist
 		os.MkdirAll(dstPathStr, os.ModePerm)
-		walkFilePath(dstPathStr, nfs)
+		walkFilePath(dstPathStr, dst)
 
 		walkPath := fmt.Sprintf("%s/%04d/%02d", *srcPath, t.Year(), int(t.Month()))
 		log.Trace("Setting walkPath to ", walkPath)
