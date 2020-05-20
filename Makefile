@@ -46,8 +46,10 @@ install:
 deploy: build install
 
 test:
-	-rm test/test.db
-	go run *go -debug -db test/test.db -dst test/out -src test/in
+	find test -name "test.db" -type f -delete
+	find test/in -type f -delete
+	find test/out -type f -delete
+	go run *go -debug -db test/test.db -dst test/out -src test/in -sleep 10
 
 clean:
 	find . -type d -name "*string*" -exec rm -rf {} \;
