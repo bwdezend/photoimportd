@@ -26,6 +26,7 @@ var dbPath = flag.String("db", usr.HomeDir+"/.photoimportd.db", "Database path")
 
 var debugEnabled = flag.Bool("debug", false, "Turn on debug level logging")
 var traceEnabled = flag.Bool("trace", false, "Turn on trace level logging")
+var promEnabled = flag.Bool("metrics", false, "Enable prometheus metrics on :2112/metrics")
 var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
 var workerCount = flag.Int("workers", 5, "Number of worker threads to run concurrently")
@@ -60,6 +61,10 @@ func init() {
 	} else {
 		// Only log the warning severity or above.
 		log.SetLevel(log.InfoLevel)
+	}
+
+	if *promEnabled {
+		log.Info("Prometheus metrics enabled")
 	}
 
 	log.Info("Sleep interval set to ", *sleepInterval, " seconds")
@@ -162,6 +167,9 @@ func dstStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 
 func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
 	for j := range jobs {
+		if *promEnabled {
+			filesScanned.Inc()
+		}
 		srcSeen := lookupHash(j, "srcPathSeen", db)
 		if len(srcSeen) != 0 {
 			log.WithFields(log.Fields{"hash": fmt.Sprintf("%x", srcSeen)}).Trace("srcPath check returned existing hash")
@@ -221,6 +229,9 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 						os.MkdirAll(folderPath, os.ModePerm)
 						log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
 						copyFileContents(fh.path, dstFh.path)
+						if *promEnabled {
+							filesCopied.Inc()
+						}
 						updateDstPathDB(dstFh, db)
 					} else {
 						log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
@@ -353,6 +364,10 @@ func main() {
 	defer db.Close()
 
 	setupDatabase(db)
+
+	if *promEnabled {
+		go prometheusMetrics()
+	}
 
 	jobs := make(chan string, 200)
 	results := make(chan fileHash, 10)
