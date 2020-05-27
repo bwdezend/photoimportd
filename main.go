@@ -26,7 +26,8 @@ var dbPath = flag.String("db", usr.HomeDir+"/.photoimportd.db", "Database path")
 
 var debugEnabled = flag.Bool("debug", false, "Turn on debug level logging")
 var traceEnabled = flag.Bool("trace", false, "Turn on trace level logging")
-var promEnabled = flag.Bool("metrics", false, "Enable prometheus metrics on :2112/metrics")
+var promEnabled = flag.Bool("metrics", false, "Enable prometheus metrics")
+var promPort = flag.Int("port", 2112, "Port to bind prometheus metrics scrape to")
 var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
 var workerCount = flag.Int("workers", 5, "Number of worker threads to run concurrently")
@@ -380,6 +381,8 @@ func main() {
 	for w := 1; w <= *workerCount; w++ {
 		go dstStorageWorker(w, dst, results, db)
 	}
+
+	walkFilePath(*srcPath, jobs)
 
 	for true {
 		t := time.Now()

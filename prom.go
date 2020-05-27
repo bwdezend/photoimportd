@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 
@@ -26,7 +27,8 @@ func exitProgram(w http.ResponseWriter, r *http.Request) {
 }
 
 func prometheusMetrics() {
+	serveAddress := fmt.Sprintf(":%d", *promPort)
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/exit", exitProgram)
-	http.ListenAndServe(":2112", nil)
+	http.ListenAndServe(serveAddress, nil)
 }
