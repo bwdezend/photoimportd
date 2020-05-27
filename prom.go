@@ -20,6 +20,11 @@ var (
 		Name: "photoimportd_files_scanned",
 		Help: "The total number of files scanned by the storageWorker",
 	})
+
+	hashLookups = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "photoimportd_hashes_checked",
+		Help: "The total number of hashed checked since startup",
+	})
 )
 
 func exitProgram(w http.ResponseWriter, r *http.Request) {

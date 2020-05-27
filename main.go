@@ -78,6 +78,10 @@ func init() {
 func lookupHash(path string, bucket string, db *bolt.DB) []byte {
 	var hash []byte
 	var exists bool
+	if *promEnabled {
+		hashLookups.Inc()
+	}
+
 	db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		v := b.Get([]byte(path))
@@ -382,7 +386,11 @@ func main() {
 		go dstStorageWorker(w, dst, results, db)
 	}
 
-	walkFilePath(*srcPath, jobs)
+	// Can't enable srcPath/dstPath startup walk without more thought.
+	//  Real problem is we either need to do both before entering main
+	//  loop, or we need to be smart about doing lookups of where the
+	//  file _would_ go after it's been written before it's written.
+	//walkFilePath(*srcPath, jobs)
 
 	for true {
 		t := time.Now()
