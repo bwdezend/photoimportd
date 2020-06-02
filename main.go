@@ -392,8 +392,23 @@ func main() {
 	//  file _would_ go after it's been written before it's written.
 	//walkFilePath(*srcPath, jobs)
 
+	// initial walk of srcPath and dstPath should be broader
+
+	t := time.Now()
+
+	dstPathStr := fmt.Sprintf("%s/%04d", *dstPath, t.Year())
+	log.Trace("Setting dstPath to ", dstPathStr)
+	// Make sure dstPathStr exists before trying to walk it, happens when date rolls over and new path doesn't yet exist
+	os.MkdirAll(dstPathStr, os.ModePerm)
+	walkFilePath(dstPathStr, dst)
+
+	walkPath := fmt.Sprintf("%s/%04d", *srcPath, t.Year())
+	log.Trace("Setting walkPath to ", walkPath)
+	os.MkdirAll(walkPath, os.ModePerm)
+	walkFilePath(walkPath, jobs)
+
 	for true {
-		t := time.Now()
+		t = time.Now()
 
 		dstPathStr := fmt.Sprintf("%s/%04d/%04d-%02d", *dstPath, t.Year(), t.Year(), int(t.Month()))
 		log.Trace("Setting dstPath to ", dstPathStr)
