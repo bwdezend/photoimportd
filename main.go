@@ -26,7 +26,8 @@ var dbPath = flag.String("db", usr.HomeDir+"/.photoimportd.db", "Database path")
 
 var debugEnabled = flag.Bool("debug", false, "Turn on debug level logging")
 var traceEnabled = flag.Bool("trace", false, "Turn on trace level logging")
-var promEnabled = flag.Bool("metrics", false, "Enable prometheus metrics")
+var rescanEnabled = flag.Bool("rescan", false, "Rescan src and dst on startup")
+var promEnabled = flag.Bool("metrics", true, "Enable prometheus metrics")
 var promPort = flag.Int("port", 2112, "Port to bind prometheus metrics scrape to")
 var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
@@ -163,6 +164,10 @@ func dstStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 			}
 			fh.path = j
 			fh.hash = h.Sum(nil)
+
+			if *promEnabled {
+				filesScanned.Inc()
+			}
 
 			updateDstPathDB(fh, db)
 			f.Close()
@@ -392,20 +397,19 @@ func main() {
 	//  file _would_ go after it's been written before it's written.
 	//walkFilePath(*srcPath, jobs)
 
-	// initial walk of srcPath and dstPath should be broader
-
 	t := time.Now()
 
-	dstPathStr := fmt.Sprintf("%s/%04d", *dstPath, t.Year())
-	log.Trace("Setting dstPath to ", dstPathStr)
-	// Make sure dstPathStr exists before trying to walk it, happens when date rolls over and new path doesn't yet exist
-	os.MkdirAll(dstPathStr, os.ModePerm)
-	walkFilePath(dstPathStr, dst)
+	if *rescanEnabled {
+		dstPathStr := fmt.Sprintf("%s", *dstPath)
+		log.Info("Started rescanning ", dstPathStr)
+		walkFilePath(dstPathStr, dst)
+		log.Info("Finished rescanning ", dstPathStr)
 
-	walkPath := fmt.Sprintf("%s/%04d", *srcPath, t.Year())
-	log.Trace("Setting walkPath to ", walkPath)
-	os.MkdirAll(walkPath, os.ModePerm)
-	walkFilePath(walkPath, jobs)
+		walkPath := fmt.Sprintf("%s", *srcPath)
+		log.Info("Starting rescanning ", walkPath)
+		walkFilePath(walkPath, jobs)
+		log.Info("Finished rescanning ", walkPath)
+	}
 
 	for true {
 		t = time.Now()
