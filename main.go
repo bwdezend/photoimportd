@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +8,11 @@ import (
 	"os/user"
 	"path/filepath"
 	"time"
+
+	// No appreciable difference using sha256-simd on a 2013 MacPro
+	//  If it becomes problematic, revert to sha256
+	// "crypto/sha256"
+	"github.com/minio/sha256-simd"
 
 	"github.com/rwcarlsen/goexif/exif"
 	log "github.com/sirupsen/logrus"
