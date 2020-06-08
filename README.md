@@ -1,6 +1,6 @@
 # photoimportd
 
-A daemon to run on macOS and backup Photos Library Masters to a remote storage location, sorted by EXIF dates.
+A daemon to run on macOS and backup Photos Library Masters to a remote storage location, sorted by EXIF dates. It attempts to wait for the files to be written to the src path before hashing and comparing with the dst path to prevent large files from being copied more than once. It also reports promtheus style metrics for performance on port 2112 by default.
 
 ```
 Usage of photoimportd:
@@ -12,6 +12,12 @@ Usage of photoimportd:
     	Dry-run
   -dst string
     	Long term storage path (default "/mnt/nfs/photos/MasterImages")
+  -metrics
+    	Enable prometheus metrics (default true)
+  -port int
+    	Port to bind prometheus metrics scrape to (default 2112)
+  -rescan
+    	Rescan src and dst on startup
   -sleep int
     	Sleep interval between src scans (default 90)
   -src string

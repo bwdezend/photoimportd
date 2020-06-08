@@ -399,7 +399,7 @@ func main() {
 	//  Real problem is we either need to do both before entering main
 	//  loop, or we need to be smart about doing lookups of where the
 	//  file _would_ go after it's been written before it's written.
-	//walkFilePath(*srcPath, jobs)
+	//  Let's do the stupid, brute force way, but only when asked.
 
 	t := time.Now()
 
