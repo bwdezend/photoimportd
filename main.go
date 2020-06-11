@@ -159,9 +159,8 @@ func updateSrcPathDB(fh fileHash, db *bolt.DB) {
 	}
 }
 
-func dstStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
+func dstStorageWorker(id int, jobs <-chan string, db *bolt.DB) {
 	for j := range jobs {
-
 		lookedUpHash := lookupHash(j, "dstPath2Hash", db)
 
 		if lookedUpHash == nil {
@@ -191,7 +190,7 @@ func dstStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *b
 	}
 }
 
-func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
+func hashFileWorker(id int, jobs <-chan string, db *bolt.DB) {
 	for j := range jobs {
 		if *promEnabled {
 			filesScanned.Inc()
@@ -395,16 +394,15 @@ func main() {
 		go prometheusMetrics()
 	}
 
-	jobs := make(chan string, 200)
-	results := make(chan fileHash, 10)
-	dst := make(chan string, 200)
+	srcChan := make(chan string, *workerCount*500)
+	dstChan := make(chan string, *workerCount*500)
 
 	for w := 1; w <= *workerCount; w++ {
-		go hashFileWorker(w, jobs, results, db)
+		go hashFileWorker(w, srcChan, db)
 	}
 
 	for w := 1; w <= *workerCount; w++ {
-		go dstStorageWorker(w, dst, results, db)
+		go dstStorageWorker(w, dstChan, db)
 	}
 
 	// Can't enable srcPath/dstPath startup walk without more thought.
@@ -418,12 +416,12 @@ func main() {
 	if *rescanEnabled {
 		dstPathStr := fmt.Sprintf("%s", *dstPath)
 		log.Info("Started rescanning ", dstPathStr)
-		walkFilePath(dstPathStr, dst)
+		walkFilePath(dstPathStr, dstChan)
 		log.Info("Finished rescanning ", dstPathStr)
 
 		walkPath := fmt.Sprintf("%s", *srcPath)
 		log.Info("Starting rescanning ", walkPath)
-		walkFilePath(walkPath, jobs)
+		walkFilePath(walkPath, srcChan)
 		log.Info("Finished rescanning ", walkPath)
 	}
 
@@ -434,12 +432,12 @@ func main() {
 		log.Trace("Setting dstPath to ", dstPathStr)
 		// Make sure dstPathStr exists before trying to walk it, happens when date rolls over and new path doesn't yet exist
 		os.MkdirAll(dstPathStr, os.ModePerm)
-		walkFilePath(dstPathStr, dst)
+		walkFilePath(dstPathStr, dstChan)
 
 		walkPath := fmt.Sprintf("%s/%04d/%02d", *srcPath, t.Year(), int(t.Month()))
 		log.Trace("Setting walkPath to ", walkPath)
 		os.MkdirAll(walkPath, os.ModePerm)
-		walkFilePath(walkPath, jobs)
+		walkFilePath(walkPath, srcChan)
 		log.Trace("looping")
 		time.Sleep(time.Second * time.Duration(*sleepInterval))
 	}
