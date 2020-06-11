@@ -73,6 +73,10 @@ func init() {
 		log.Info("Prometheus metrics enabled")
 	}
 
+	if *dryrunEnabled {
+		log.Info("Running with -dryrun, no files will be copied, no database updates will be made")
+	}
+
 	log.Info("Sleep interval set to ", *sleepInterval, " seconds")
 	log.Info("Worker count set to ", *workerCount, " threads")
 	log.Info("Database Path Set to: ", *dbPath)
@@ -119,32 +123,40 @@ func hashExists(hash []byte, bucket string, db *bolt.DB) bool {
 }
 
 func updateDstPathDB(fh fileHash, db *bolt.DB) {
-	db.Update(func(tx *bolt.Tx) error {
-		h2p := tx.Bucket([]byte("dstHash2Path"))
-		err := h2p.Put(fh.hash, []byte(fh.path))
-		if err != nil {
-			fmt.Println("Error!")
-		}
-		p2h := tx.Bucket([]byte("dstPath2Hash"))
-		err = p2h.Put([]byte(fh.path), fh.hash)
-		if err != nil {
-			fmt.Println("Error!")
-		}
-		log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding unseen dstPath file to database")
-		return nil
-	})
+	if *dryrunEnabled == true {
+		log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Would have added unseen dstPath file to database (-dryrun enabled)")
+	} else {
+		db.Update(func(tx *bolt.Tx) error {
+			h2p := tx.Bucket([]byte("dstHash2Path"))
+			err := h2p.Put(fh.hash, []byte(fh.path))
+			if err != nil {
+				fmt.Println("Error!")
+			}
+			p2h := tx.Bucket([]byte("dstPath2Hash"))
+			err = p2h.Put([]byte(fh.path), fh.hash)
+			if err != nil {
+				fmt.Println("Error!")
+			}
+			log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding unseen dstPath file to database")
+			return nil
+		})
+	}
 }
 
 func updateSrcPathDB(fh fileHash, db *bolt.DB) {
-	db.Update(func(tx *bolt.Tx) error {
-		seen := tx.Bucket([]byte("srcPathSeen"))
-		err := seen.Put([]byte(fh.path), []byte(fh.hash))
-		if err != nil {
-			fmt.Println("Error!")
-		}
-		return nil
-	})
-	log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding unseen srcPath file to database")
+	if *dryrunEnabled == true {
+		log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Would have added unseen srcPath file to database (-dryrun enabled)")
+	} else {
+		db.Update(func(tx *bolt.Tx) error {
+			seen := tx.Bucket([]byte("srcPathSeen"))
+			err := seen.Put([]byte(fh.path), []byte(fh.hash))
+			if err != nil {
+				fmt.Println("Error!")
+			}
+			return nil
+		})
+		log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Debug("Adding unseen srcPath file to database")
+	}
 }
 
 func dstStorageWorker(id int, jobs <-chan string, results chan<- fileHash, db *bolt.DB) {
