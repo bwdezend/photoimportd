@@ -240,7 +240,11 @@ func hashFileWorker(id int, jobs <-chan string, results chan<- fileHash, db *bol
 					}
 
 					if *dryrunEnabled == false {
-						os.MkdirAll(folderPath, os.ModePerm)
+
+						err := os.MkdirAll(folderPath, os.ModePerm)
+						if err != nil {
+							log.WithFields(log.Fields{"error": err, "path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Preparing filepath failed", err)
+						}
 						log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
 						copyFileContents(fh.path, dstFh.path)
 						if *promEnabled {
