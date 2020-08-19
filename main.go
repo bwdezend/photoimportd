@@ -228,43 +228,53 @@ func hashFileWorker(id int, jobs <-chan string, db *bolt.DB) {
 					log.Error("Error! ", err)
 				}
 
+				fileYear = 0
+				fileMonth = 0
+				fileDay = 0
+
 				fileExif, err := exif.Decode(exifRead)
 				if err != nil {
-					log.Error("Error! ", err)
+					log.Error("Error!", err)
 				} else {
 					// Now that we have basic EXIF data from the file, we need to get the year,
 					//  numeric month and day so the storage path can be constructed.
 					t, err := fileExif.DateTime()
+
 					if err != nil {
 						log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Warn("Error! ", err)
-					}
-					fileYear = t.Year()
-					fileMonth = int(t.Month())
-					fileDay = t.Day()
-
-					folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
-					dstFh.path = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
-
-					if fileYear == 1 {
-						// Could not detect the EXIF date data, use a hash to override
-						dstFh.path = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", *dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
-					}
-
-					if *dryrunEnabled == false {
-
-						err := os.MkdirAll(folderPath, os.ModePerm)
-						if err != nil {
-							log.WithFields(log.Fields{"error": err, "path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Fatal("Preparing filepath failed", err)
-						}
-						log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
-						copyFileContents(fh.path, dstFh.path)
-						if *promEnabled {
-							filesCopied.Inc()
-						}
-						updateDstPathDB(dstFh, db)
 					} else {
-						log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
+						fileYear = t.Year()
+						fileMonth = int(t.Month())
+						fileDay = t.Day()
 					}
+				}
+
+				folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
+				dstFh.path = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
+
+				if fileYear == 0 {
+					// Could not detect the EXIF date data, use a hash to override
+					folderPath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, 0, 0, 0, 0, 0, 0)
+					dstFh.path = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", *dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
+				}
+
+				if *dryrunEnabled == false {
+
+					err := os.MkdirAll(folderPath, os.ModePerm)
+					if err != nil {
+						log.WithFields(log.Fields{"error": err, "path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Fatal("Preparing filepath failed", err)
+					}
+
+					log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Copying file to long term storage")
+					copyFileContents(fh.path, dstFh.path)
+
+					if *promEnabled {
+						filesCopied.Inc()
+					}
+
+					updateDstPathDB(dstFh, db)
+				} else {
+					log.WithFields(log.Fields{"path": fh.path, "dstPath": dstFh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Info("Would have copied file to long term storage")
 				}
 			}
 			if *dryrunEnabled == false {
