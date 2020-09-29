@@ -34,6 +34,7 @@ var rescanEnabled = flag.Bool("rescan", false, "Rescan src and dst on startup")
 var promEnabled = flag.Bool("metrics", true, "Enable prometheus metrics")
 var promPort = flag.Int("port", 2112, "Port to bind prometheus metrics scrape to")
 var dryrunEnabled = flag.Bool("dryrun", false, "Dry-run")
+var walkAllEnabled = flag.Bool("all", false, "Walk all folders in srcPath")
 var sleepInterval = flag.Int("sleep", 90, "Sleep interval between src scans")
 var workerCount = flag.Int("workers", 5, "Number of worker threads to run concurrently")
 
@@ -71,6 +72,10 @@ func init() {
 
 	if *promEnabled {
 		log.Info("Prometheus metrics enabled")
+	}
+
+	if *walkAllEnabled {
+		log.Info(fmt.Sprintf("Running with -all. This will scan all files in %s", *srcPath))
 	}
 
 	if *dryrunEnabled {
@@ -448,10 +453,28 @@ func main() {
 		os.MkdirAll(dstPathStr, os.ModePerm)
 		walkFilePath(dstPathStr, dstChan)
 
-		walkPath := fmt.Sprintf("%s/%04d/%02d", *srcPath, t.Year(), int(t.Month()))
-		log.Trace("Setting walkPath to ", walkPath)
-		os.MkdirAll(walkPath, os.ModePerm)
-		walkFilePath(walkPath, srcChan)
+		if *walkAllEnabled {
+			walkPath := fmt.Sprintf("%s", *srcPath)
+			log.Trace("Setting walkPath to ", walkPath)
+			os.MkdirAll(walkPath, os.ModePerm)
+			walkFilePath(walkPath, srcChan)
+		} else {
+			walkPath := fmt.Sprintf("%s/%04d/%04d-%02d", *srcPath, t.Year(), t.Year(), int(t.Month()))
+			log.Trace("Setting walkPath to ", walkPath)
+			os.MkdirAll(walkPath, os.ModePerm)
+			walkFilePath(walkPath, srcChan)
+
+			walkPath = fmt.Sprintf("%s/%04d/%02d", *srcPath, t.Year(), int(t.Month()))
+			log.Trace("Setting walkPath to ", walkPath)
+			os.MkdirAll(walkPath, os.ModePerm)
+			walkFilePath(walkPath, srcChan)
+
+			walkPath = fmt.Sprintf("%s/0", *srcPath)
+			log.Trace("Setting walkPath to ", walkPath)
+			os.MkdirAll(walkPath, os.ModePerm)
+			walkFilePath(walkPath, srcChan)
+		}
+
 		log.Trace("looping")
 		time.Sleep(time.Second * time.Duration(*sleepInterval))
 	}
