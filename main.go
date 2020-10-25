@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -8,13 +9,13 @@ import (
 	"os/user"
 	"path/filepath"
 	"time"
-
 	// No appreciable difference using sha256-simd on a 2013 MacPro
 	//  If it becomes problematic, revert to sha256
 	// "crypto/sha256"
 	"github.com/minio/sha256-simd"
 
-	"github.com/rwcarlsen/goexif/exif"
+	"github.com/dsoprea/go-exif/v3"
+	//"github.com/rwcarlsen/goexif/exif"
 	log "github.com/sirupsen/logrus"
 	bolt "go.etcd.io/bbolt"
 )
@@ -195,6 +196,43 @@ func dstStorageWorker(id int, jobs <-chan string, db *bolt.DB) {
 	}
 }
 
+func lookupExifDate(rawExif []byte) (time.Time, error) {
+	ts := time.Now()
+	entries, _, err := exif.GetFlatExifData(rawExif, nil)
+	layout := "2006:01:02 15:04:05"
+	for _, entry := range entries {
+		fmt.Printf("%s - %s\n", entry.TagName, entry.Formatted)
+		fmt.Printf("IFD-PATH=[%s] ID=(0x%04x) NAME=[%s] COUNT=(%d) TYPE=[%s] VALUE=[%s]\n", entry.IfdPath, entry.TagId, entry.TagName, entry.UnitCount, entry.TagTypeName, entry.Formatted)
+		if entry.TagName == "DateTimeOriginal" {
+			ts, err = time.Parse(layout, entry.Formatted)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.WithFields(log.Fields{"parsedDateTime": ts}).Debug("Parsed DateTime from DateTimeOriginal EXIF header")
+			return ts, nil
+		} else if entry.TagName == "DateTimeDigitized" {
+			ts, err = time.Parse(layout, entry.Formatted)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.WithFields(log.Fields{"parsedDateTime": ts}).Debug("Parsed DateTime from DateTimeDigitized EXIF header")
+			return ts, nil
+		} else if entry.TagName == "GPSDateStamp" {
+			ts, err = time.Parse(layout, entry.Formatted)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.WithFields(log.Fields{"parsedDateTime": ts}).Debug("Parsed DateTime from GPSDateStamp EXIF header")
+			return ts, nil
+		}
+	}
+	ts, err = time.Parse(layout, "0001:01:01 01:00:00")
+	if err != nil {
+		log.Fatal(err)
+	}
+	return ts, errors.New("Unable to parse DateTime from EXIF headers")
+}
+
 func hashFileWorker(id int, jobs <-chan string, db *bolt.DB) {
 	for j := range jobs {
 		if *promEnabled {
@@ -228,40 +266,18 @@ func hashFileWorker(id int, jobs <-chan string, db *bolt.DB) {
 			if dstSeen == true {
 				log.WithFields(log.Fields{"hash": fmt.Sprintf("%x", fh.hash)}).Trace("dstPath check returned existing hash")
 			} else {
-				exifRead, err := os.Open(j)
+				fileExif, err := exif.SearchFileAndExtractExif(j)
+				t, err := lookupExifDate(fileExif)
 				if err != nil {
-					log.Error("Error! ", err)
-				}
-
-				fileYear = 0
-				fileMonth = 0
-				fileDay = 0
-
-				fileExif, err := exif.Decode(exifRead)
-				if err != nil {
-					log.Error("Error!", err)
+					log.Error(err)
 				} else {
-					// Now that we have basic EXIF data from the file, we need to get the year,
-					//  numeric month and day so the storage path can be constructed.
-					t, err := fileExif.DateTime()
-
-					if err != nil {
-						log.WithFields(log.Fields{"path": fh.path, "hash": fmt.Sprintf("%x", fh.hash)}).Warn("Error! ", err)
-					} else {
-						fileYear = t.Year()
-						fileMonth = int(t.Month())
-						fileDay = t.Day()
-					}
+					fileYear = t.Year()
+					fileMonth = int(t.Month())
+					fileDay = t.Day()
 				}
 
 				folderPath := fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay)
 				dstFh.path = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%s", *dstPath, fileYear, fileYear, fileMonth, fileYear, fileMonth, fileDay, filepath.Base(j))
-
-				if fileYear == 0 {
-					// Could not detect the EXIF date data, use a hash to override
-					folderPath = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/", *dstPath, 0, 0, 0, 0, 0, 0)
-					dstFh.path = fmt.Sprintf("%s/%d/%d-%02d/%d-%02d-%02d/%x-%s", *dstPath, 0, 0, 0, 0, 0, 0, fh.hash, filepath.Base(j))
-				}
 
 				if *dryrunEnabled == false {
 
