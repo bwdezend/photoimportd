@@ -197,12 +197,13 @@ func dstStorageWorker(id int, jobs <-chan string, db *bolt.DB) {
 }
 
 func lookupExifDate(rawExif []byte) (time.Time, error) {
-	ts := time.Now()
 	entries, _, err := exif.GetFlatExifData(rawExif, nil)
 	layout := "2006:01:02 15:04:05"
+	ts, err := time.Parse(layout, "0001:01:01 01:00:00")
+        if err != nil {
+             log.Fatal(err)
+        }
 	for _, entry := range entries {
-		fmt.Printf("%s - %s\n", entry.TagName, entry.Formatted)
-		fmt.Printf("IFD-PATH=[%s] ID=(0x%04x) NAME=[%s] COUNT=(%d) TYPE=[%s] VALUE=[%s]\n", entry.IfdPath, entry.TagId, entry.TagName, entry.UnitCount, entry.TagTypeName, entry.Formatted)
 		if entry.TagName == "DateTimeOriginal" {
 			ts, err = time.Parse(layout, entry.Formatted)
 			if err != nil {
@@ -225,10 +226,6 @@ func lookupExifDate(rawExif []byte) (time.Time, error) {
 			log.WithFields(log.Fields{"parsedDateTime": ts}).Debug("Parsed DateTime from GPSDateStamp EXIF header")
 			return ts, nil
 		}
-	}
-	ts, err = time.Parse(layout, "0001:01:01 01:00:00")
-	if err != nil {
-		log.Fatal(err)
 	}
 	return ts, errors.New("Unable to parse DateTime from EXIF headers")
 }
