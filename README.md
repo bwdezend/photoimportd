@@ -4,6 +4,8 @@ A daemon to run on macOS and backup Photos Library Masters to a remote storage l
 
 ```
 Usage of photoimportd:
+  -all
+      Scan all folders in -src instead of date-based scanning
   -db string
     	Database path (default "~/.photoimportd.db")
   -debug
