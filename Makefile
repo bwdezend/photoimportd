@@ -40,20 +40,22 @@ run:
 
 
 install:
-	cp photoimportd /usr/local/bin/photoimportd 
-	chmod +x /usr/local/bin/photoimportd
+	sudo cp photoimportd /usr/local/bin/photoimportd 
+	sudo chmod +x /usr/local/bin/photoimportd
 
 deploy: build install
 
 test:
 	find test -name "test.db" -type f -delete
-	find test/in -type f -delete
-	find test/out -type f -delete
-	go run *go -metrics -debug -db test/test.db -dst test/out -src test/in -sleep 10
+	mkdir -p test/in && find test/in -type f -delete
+	mkdir -p test/out && find test/out -type f -delete
+	find test/video -type f -exec cp {} test/in/ \;
+	find test/image -type f -exec cp {} test/in/ \;
+	go run *go -metrics -debug -all -db test/test.db -dst test/out -src test/in -sleep 10
 
 clean:
 	find . -type d -name "*string*" -exec rm -rf {} \;
-	rm photoimportd
+	-rm photoimportd
 	rm -rf test/test.db
 	rm -rf test/in
 	rm -rf test/out
