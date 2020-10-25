@@ -200,9 +200,9 @@ func lookupExifDate(rawExif []byte) (time.Time, error) {
 	entries, _, err := exif.GetFlatExifData(rawExif, nil)
 	layout := "2006:01:02 15:04:05"
 	ts, err := time.Parse(layout, "0001:01:01 01:00:00")
-        if err != nil {
-             log.Fatal(err)
-        }
+	if err != nil {
+		log.Fatal(err)
+	}
 	for _, entry := range entries {
 		if entry.TagName == "DateTimeOriginal" {
 			ts, err = time.Parse(layout, entry.Formatted)
